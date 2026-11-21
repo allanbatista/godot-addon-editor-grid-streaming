@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 from shutil import copyfile, copytree
@@ -74,10 +75,47 @@ def create_fixture(project):
     (project / "world.tscn").write_text(world)
 
 
+def create_class_fixture(project):
+    locations = {
+        "NearLimit": ("res://class_near.tscn", 5, ""),
+        "LocalLimit": ("res://near.tscn", 25, "dist_local"),
+        "MidLimit": ("res://near.tscn", 50, "dist_mid"),
+        "AwayLimit": ("res://near.tscn", 100, "dist_away"),
+        "RemoteLimit": ("res://near.tscn", 200, "dist_remote"),
+        "CustomLimit": ("res://near.tscn", 12, "dist_custom"),
+        "Room": ("res://room.tscn", 0, "dist_local"),
+    }
+    class_root = WORLD.replace('radius_meters = 10.0', 'radius_meters = 1.0')
+    for name, (path, x, stream_class) in locations.items():
+        class_root += (
+            f'\n[node name="{name}" type="Node3D" parent="."]\n'
+            f'position = Vector3({x}, 0, 0)\nscript = ExtResource("1")\nscene_path = "{path}"\n'
+            f'stream_class = &"{stream_class}"\n'
+        )
+    (project / "classes.tscn").write_text(class_root)
+    (project / "class_near.tscn").write_text(PREFAB.replace(
+        '[node name="Prefab" type="Node3D"]',
+        '[node name="Prefab" type="Node3D" groups=["world_object"]]\nmetadata/stream_class = "dist_near"',
+    ))
+    (project / "detail.tscn").write_text(PREFAB)
+    (project / "room.tscn").write_text(
+        '[gd_scene format=3]\n\n'
+        '[ext_resource type="Script" path="res://addons/editor_proximity_streaming/proximity_placement_3d.gd" id="1"]\n\n'
+        '[node name="Room" type="Node3D"]\nmetadata/stream_volume = AABB(-2, 0, 2, 4, 3, 3)\n\n'
+        '[node name="Detail" type="Node3D" parent="." groups=["interior_detail"]]\n'
+        'position = Vector3(0, 1, 3)\nscript = ExtResource("1")\n'
+        'scene_path = "res://detail.tscn"\nstream_class = &"dist_near"\n'
+    )
+    (project / "proximity_prefabs.json").write_text(json.dumps(
+        {"res://class_near.tscn": {"class": "dist_near", "groups": ["world_object"]}}
+    ))
+
+
 def main():
     evidence = Path(tempfile.mkdtemp(prefix="editor-proximity-streaming-test-"))
     project = evidence / "project"
     create_fixture(project)
+    create_class_fixture(project)
     log_path = evidence / "editor.log"
     print(f"Evidências em {evidence}", flush=True)
     environment = os.environ | {

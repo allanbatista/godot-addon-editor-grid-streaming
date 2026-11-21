@@ -6,6 +6,10 @@ const EDITOR_GROUP := &"_editor_proximity_placements"
 
 ## Caminho da cena carregada quando este objeto entra no alcance.
 @export_file("*.tscn", "*.scn") var scene_path: String
+## Classe específica para esta colocação. Vazio usa a classe do prefab.
+@export var stream_class: StringName
+## Volume local opcional de ativação. Salas podem fornecer stream_volume no nó pai.
+@export var activation_volume := AABB()
 ## Propriedades da raiz do prefab sobrescritas nesta colocação.
 @export var instance_properties: Dictionary = {}
 @export_tool_button("Open Prefab", "PackedScene") var open_prefab: Callable = _open_prefab

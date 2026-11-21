@@ -6,16 +6,32 @@ Addon para editar mapas grandes no Godot. Os prefabs entram sob demanda em uma �
 
 1. Copie `addons/editor_proximity_streaming` para a pasta `addons/` do projeto.
 2. Ative **Editor Proximity Streaming** nas configurações de plugins do Godot.
-3. Adicione um nó `ProximityPreview3D` como filho direto da cena do mapa. Ajuste **Radius Meters** no Inspector. Por exemplo, 50 m definem uma área de 100 × 100 m no plano X/Z.
-4. Para cada objeto carregado sob demanda, adicione um `ProximityPlacement3D` ao mapa. Defina **Scene Path** para seu prefab com raiz `Node3D` e ajuste a transformação da colocação.
+3. Adicione um nó `ProximityPreview3D` como filho direto da cena do mapa.
+4. Use um `ProximityPlacement3D` com **Scene Path** para cada prefab carregado sob demanda.
 
-## Edição
+## Classes de distância
 
-O addon carrega o prefab quando ele toca a área da câmera. Use o metadado opcional `stream_bounds` com uma `AABB` local à colocação para contabilizar a extensão do objeto. Por padrão, o alcance usa a origem da colocação.
+Edite **Distance Classes** no Inspector do nó `ProximityPreview3D`. Cada entrada usa X para carregar e Y para descarregar, em metros. A distância mede o quadrado no plano X/Z até os limites do objeto. **Radius Meters** é o alcance das colocações sem classe.
 
-Selecione e mova a colocação no mapa. Use **Open Prefab** no Inspector para editar a cena original. **Instance Properties** permite sobrescrever propriedades da raiz para uma colocação.
+| Classe | Entrada | Saída |
+| --- | ---: | ---: |
+| `dist_near` | 5 m | 7 m |
+| `dist_local` | 25 m | 32 m |
+| `dist_mid` | 50 m | 60 m |
+| `dist_away` | 100 m | 115 m |
+| `dist_remote` | 200 m | 220 m |
 
-As prévias são carregadas pelo editor. Um projeto pode usar o caminho e a transformação das colocações com seu próprio carregador durante o jogo.
+Adicione classes ao dicionário com o nome e os valores da sua escolha. **Stream Class** na colocação sobrescreve a classe do prefab.
+
+## Prefabs e interiores
+
+Na raiz do prefab, use o metadado `stream_class` e os grupos `world_object` ou `interior_detail`. Salve a cena para atualizar `proximity_prefabs.json`. Esse arquivo pode ser compartilhado com o projeto. O addon consulta os dados do índice antes de solicitar a cena.
+
+O metadado opcional `stream_bounds` é uma `AABB` local para contabilizar a extensão do objeto. A tag `interior_detail` também exige que a câmera esteja dentro de **Activation Volume** da colocação ou do `stream_volume` de um nó pai.
+
+Um prefab grande pode registrar `stream_preview_path` na raiz com o caminho de uma prévia leve. Essa prévia pode conter outras colocações carregáveis. Divida os detalhes em cenas que só sejam referenciadas por caminho na prévia. Use **Open Prefab** para editar a cena original.
+
+A leitura das cenas roda em segundo plano. A montagem e a remoção na árvore do editor são distribuídas com até uma operação por quadro. Use prévias pequenas para reduzir o custo de uma operação individual.
 
 ## Validação
 

@@ -82,8 +82,62 @@ func _run() -> void:
 	EditorInterface.set_plugin_enabled("editor_proximity_streaming", true)
 	if not await _expect_previews(["Far"]):
 		return
+	if not await _test_classes():
+		return
 	print("PASS editor_proximity_streaming")
 	get_tree().quit(0)
+
+
+func _test_classes() -> bool:
+	var path := "res://classes.tscn"
+	_position = Vector3(0, 1, 0)
+	EditorInterface.open_scene_from_path(path)
+	if not await _wait_for(func() -> bool: return _is_open(path), "Could not open the class fixture."):
+		return false
+	_world = EditorInterface.get_edited_scene_root()
+	var settings := _world.get_node("Preview") as ProximityPreview3D
+	settings.distance_classes[&"dist_custom"] = Vector2(12, 14)
+	if not await _expect_previews(["AwayLimit", "CustomLimit", "LocalLimit", "MidLimit", "NearLimit", "RemoteLimit", "Room"]):
+		return false
+	var room := _world.get_node("Room").get_child(0, true)
+	var detail := room.get_node("Detail")
+	if not _check(detail.get_child_count(true) == 0 and not ResourceLoader.has_cached("res://detail.tscn"),
+			"Interior resource was loaded from outside its volume."):
+		return false
+	_position.z = 3.0
+	if not await _wait_for(func() -> bool: return detail.get_child_count(true) == 1, "Interior did not load in its volume."):
+		return false
+	_position.y = 5.0
+	if not await _wait_for(func() -> bool: return detail.get_child_count(true) == 0, "Interior remained loaded on another floor."):
+		return false
+	print("PASS class defaults, custom class and nested 3D volume")
+
+	var custom := _world.get_node("CustomLimit")
+	_position = Vector3(-1, 1, 0)
+	await get_tree().create_timer(0.25).timeout
+	if not _check(custom.get_child_count(true) == 1, "A placement inside the unload distance was discarded."):
+		return false
+	_position.x = -3.0
+	if not await _wait_for(func() -> bool: return custom.get_child_count(true) == 0, "Custom unload distance was ignored."):
+		return false
+	_position.x = -1.0
+	await get_tree().create_timer(0.25).timeout
+	if not _check(custom.get_child_count(true) == 0, "Outside the load distance the placement was reloaded."):
+		return false
+	print("PASS hysteresis")
+
+	EditorInterface.open_scene_from_path("res://class_near.tscn")
+	if not await _wait_for(
+		func() -> bool: return _is_open("res://class_near.tscn"),
+		"Could not edit the tagged prefab."
+	):
+		return false
+	var prefab := EditorInterface.get_edited_scene_root()
+	prefab.set_meta(&"stream_class", "dist_custom")
+	if not _check(EditorInterface.save_scene() == OK, "Could not save the class metadata."):
+		return false
+	var index: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://proximity_prefabs.json"))
+	return _check(index["res://class_near.tscn"]["class"] == "dist_custom", "Prefab save did not refresh the index.")
 
 
 func _is_open(path: String) -> bool:
