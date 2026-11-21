@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from shutil import copytree, copyfile
+from shutil import copyfile, copytree
 import subprocess
 import tempfile
 
@@ -9,10 +9,10 @@ REPOSITORY = Path(__file__).resolve().parent.parent
 PROJECT = """config_version=5
 
 [application]
-config/name="Editor Grid Streaming Test"
+config/name="Editor Proximity Streaming Test"
 
 [editor_plugins]
-enabled=PackedStringArray("res://addons/editor_grid_streaming/plugin.cfg", "res://addons/test_probe/plugin.cfg")
+enabled=PackedStringArray("res://addons/editor_proximity_streaming/plugin.cfg", "res://addons/test_probe/plugin.cfg")
 
 [rendering]
 renderer/rendering_method="gl_compatibility"
@@ -20,49 +20,62 @@ renderer/rendering_method="gl_compatibility"
 
 WORLD = """[gd_scene format=3]
 
-[ext_resource type="Script" path="res://addons/editor_grid_streaming/editor_streaming_grid_3d.gd" id="1"]
+[ext_resource type="Script" path="res://addons/editor_proximity_streaming/proximity_placement_3d.gd" id="1"]
+[ext_resource type="Script" path="res://addons/editor_proximity_streaming/proximity_preview_3d.gd" id="2"]
 
 [node name="World" type="Node3D"]
 
-[node name="Grid" type="Node3D" parent="."]
-position = Vector3(100, 0, -40)
-script = ExtResource("1")
-cells_directory = "res://cells"
-cell_size = 10.0
+[node name="Preview" type="Node" parent="."]
+script = ExtResource("2")
+radius_meters = 10.0
 """
 
-CELL = """[gd_scene format=3]
+PREFAB = """[gd_scene format=3]
 
 [sub_resource type="BoxMesh" id="BoxMesh_1"]
-size = Vector3(7, 2, 7)
+size = Vector3(2, 2, 2)
 
-[node name="Cell" type="Node3D"]
+[node name="Prefab" type="Node3D"]
 
 [node name="Building" type="MeshInstance3D" parent="."]
-position = Vector3(5, 1, 5)
 mesh = SubResource("BoxMesh_1")
 """
 
+PLACEMENTS = (
+    ("Near", 2, 2),
+    ("Diagonal", 10, 10),
+    ("LeftEdge", -10, 0),
+    ("Overlap", 15, 0),
+    ("Beyond", 10.2, 0),
+    ("Far", 200, 0),
+)
+
 
 def create_fixture(project):
-    copytree(REPOSITORY / "addons" / "editor_grid_streaming", project / "addons" / "editor_grid_streaming")
+    addon = "editor_proximity_streaming"
+    copytree(REPOSITORY / "addons" / addon, project / "addons" / addon)
     probe = project / "addons" / "test_probe"
     probe.mkdir()
     (probe / "plugin.cfg").write_text('[plugin]\nname="Test Probe"\nscript="editor_test.gd"\n')
     copyfile(REPOSITORY / "tests" / "editor_test.gd", probe / "editor_test.gd")
-
     (project / "project.godot").write_text(PROJECT)
-    (project / "world.tscn").write_text(WORLD)
-    cells = project / "cells"
-    cells.mkdir()
-    for x in range(-3, 4):
-        for z in range(-3, 4):
-            if (x, z) != (3, 3):
-                (cells / f"cell_{x}_{z}.tscn").write_text(CELL)
+    for name in ("near", "far"):
+        (project / f"{name}.tscn").write_text(PREFAB)
+    world = WORLD
+    for name, x, z in PLACEMENTS:
+        prefab = "far" if name == "Far" else "near"
+        world += (
+            f'\n[node name="{name}" type="Node3D" parent="."]\n'
+            f'position = Vector3({x}, 0, {z})\nscript = ExtResource("1")\n'
+            f'scene_path = "res://{prefab}.tscn"\n'
+        )
+        if name == "Overlap":
+            world += "metadata/stream_bounds = AABB(-5, -1, -1, 10, 2, 2)\n"
+    (project / "world.tscn").write_text(world)
 
 
 def main():
-    evidence = Path(tempfile.mkdtemp(prefix="editor-grid-streaming-test-"))
+    evidence = Path(tempfile.mkdtemp(prefix="editor-proximity-streaming-test-"))
     project = evidence / "project"
     create_fixture(project)
     log_path = evidence / "editor.log"
@@ -71,16 +84,15 @@ def main():
         "XDG_DATA_HOME": str(evidence / "data"),
         "XDG_CONFIG_HOME": str(evidence / "config"),
         "XDG_CACHE_HOME": str(evidence / "cache"),
-        "GRID_TEST_OUTPUT": str(evidence),
     }
     command = [
         os.environ.get("GODOT_BIN", "godot"),
         "--editor", "--path", str(project), "--rendering-method", "gl_compatibility",
-        "--resolution", "1280x720", "res://world.tscn",
+        "--resolution", "1100x680", "res://world.tscn",
     ]
     try:
         with log_path.open("w", encoding="utf-8") as log:
-            result = subprocess.run(command, env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=75)
+            result = subprocess.run(command, env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=65)
     except subprocess.TimeoutExpired:
         print(f"O editor excedeu o tempo do teste. Consulte {log_path}.")
         return 1
@@ -89,7 +101,7 @@ def main():
     for line in output.splitlines():
         if line.startswith(("Godot Engine", "PASS ", "ERROR:", "SCRIPT ERROR:")):
             print(line)
-    if result.returncode != 0 or "PASS editor_grid_streaming" not in output:
+    if result.returncode != 0 or "PASS editor_proximity_streaming" not in output:
         print(f"O teste falhou. Consulte {log_path}.")
         return 1
     return 0
