@@ -1,19 +1,34 @@
 # Editor Proximity Streaming
 
-Addon para editar mapas grandes no Godot. Os prefabs entram sob demanda em uma área quadrada ao redor da câmera 3D principal do editor. Cada colocação continua editável na mesma cena do mapa.
+Addon para navegar e editar cenas 3D no Godot. Instâncias distantes aparecem
+como caixas simples. Clique na caixa para selecionar a instância original
+e pressione **F** na vista 3D para focá-la.
 
 ## Instalação
 
-1. Copie `addons/editor_proximity_streaming` para a pasta `addons/` do projeto.
-2. Ative **Editor Proximity Streaming** nas configurações de plugins do Godot.
-3. Adicione um nó `ProximityPreview3D` como filho direto da cena do mapa.
-4. Use um `ProximityPlacement3D` com **Scene Path** para cada prefab carregado sob demanda.
+1. Copie `addons/editor_proximity_streaming/` para o diretório `addons/`
+   do seu projeto.
+2. Em **Project → Project Settings → Plugins**, ative **Editor Proximity
+   Streaming**.
+3. Abra a cena em que pretende trabalhar e entre na vista **3D**.
 
-## Classes de distância
+Validado com Godot 4.7.2. A grade de protótipo é gerada pelo shader do addon.
 
-Edite **Distance Classes** no Inspector do nó `ProximityPreview3D`. Cada entrada usa X para carregar e Y para descarregar, em metros. A distância mede o quadrado no plano X/Z até os limites do objeto. **Radius Meters** é o alcance das colocações sem classe.
+## Configure uma instância
 
-| Classe | Entrada | Saída |
+1. Instancie o prefab na cena como de costume.
+2. No menu de contexto da instância, marque **Load as Placeholder**.
+3. Na raiz do prefab, atribua uma das classes de distância como grupo ou
+   use o metadado `stream_class`. Para sobrescrever a classe de uma
+   colocação específica, use `stream_class` nessa instância.
+
+O grupo `world_object` equivale a `dist_mid` quando a classe está ausente.
+`interior_detail` usa `dist_near` por padrão. O addon troca a representação
+das instâncias marcadas e com tag.
+
+## Distâncias e cores
+
+| Tag | Volta à malha ao chegar a | Volta à caixa ao ultrapassar |
 | --- | ---: | ---: |
 | `dist_near` | 5 m | 7 m |
 | `dist_local` | 25 m | 32 m |
@@ -21,28 +36,50 @@ Edite **Distance Classes** no Inspector do nó `ProximityPreview3D`. Cada entrad
 | `dist_away` | 100 m | 115 m |
 | `dist_remote` | 200 m | 220 m |
 
-Adicione classes ao dicionário com o nome e os valores da sua escolha. **Stream Class** na colocação sobrescreve a classe do prefab.
+O alcance é quadrado no plano X/Z e mede a distância até os limites da
+instância. O metadado opcional `stream_bounds` aceita uma `AABB` em
+coordenadas locais. Quando ele está ausente, o addon usa os limites da
+geometria. Um valor personalizado em `stream_class` usa o alcance padrão
+de 45 m.
 
-## Prefabs e interiores
+Cada caixa compartilha uma malha de oito vértices e doze triângulos.
+A cor-base identifica a classe. Dentro da classe, o brilho varia em
+cinco níveis estáveis, calculados pelo caminho da instância na cena.
+As caixas são gizmos do editor e a cena salva conserva as instâncias
+originais.
 
-Na raiz do prefab, use o metadado `stream_class` e os grupos `world_object` ou `interior_detail`. Salve a cena para atualizar `proximity_prefabs.json`. Esse arquivo pode ser compartilhado com o projeto. O addon consulta os dados do índice antes de solicitar a cena.
+## Recursos no editor e no jogo
 
-O metadado opcional `stream_bounds` é uma `AABB` local para contabilizar a extensão do objeto. A tag `interior_detail` também exige que a câmera esteja dentro de **Activation Volume** da colocação ou do `stream_volume` de um nó pai.
+O Godot abre as instâncias nativas e seus recursos ao carregar a cena
+no editor. A caixa reduz a geometria desenhada ao longe e o addon oculta
+as luzes do prefab nesse estado. O custo inicial de instanciar os recursos
+continua sujeito ao tamanho e à quantidade dos prefabs.
 
-Um prefab grande pode registrar `stream_preview_path` na raiz com o caminho de uma prévia leve. Essa prévia pode conter outras colocações carregáveis. Divida os detalhes em cenas que só sejam referenciadas por caminho na prévia. Use **Open Prefab** para editar a cena original.
+No jogo, **Load as Placeholder** produz um `InstancePlaceholder`. O
+gerenciador de carregamento do jogo decide quando criar essa instância.
+[Documentação do Godot](https://docs.godotengine.org/en/4.7/classes/class_instanceplaceholder.html)
 
-A leitura das cenas roda em segundo plano. A montagem e a remoção na árvore do editor são distribuídas com até uma operação por quadro. Use prévias pequenas para reduzir o custo de uma operação individual.
+## Atualização da versão 0.3
 
-## Validação
+Nas cenas que usavam `ProximityPlacement3D`, instancie o prefab registrado
+em **Scene Path** e transfira a transformação e os metadados da colocação.
+Marque **Load as Placeholder** e confira a classe de distância. O fluxo
+0.4 usa a instância e suas tags. O nó `ProximityPreview3D` e o índice
+`proximity_prefabs.json` faziam parte da configuração 0.3.
 
-Testado no Godot 4.7.2. O teste usa um projeto temporário e abre o editor.
+## Teste
+
+Com Godot no PATH, execute o teste em um projeto temporário.
 
 ```bash
 python3 tests/run_editor_test.py
 ```
 
-No Linux sem desktop, execute com uma tela virtual.
+No Linux sem desktop, use uma tela virtual.
 
 ```bash
 xvfb-run -a python3 tests/run_editor_test.py
 ```
+
+O teste cobre instâncias nativas, classes de distância, a troca visual
+na fronteira, as cores e o arquivo salvo.

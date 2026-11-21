@@ -1,7 +1,10 @@
 @tool
 extends EditorPlugin
 
+const ADDON := "editor_proximity_streaming"
+const ADDON_SCRIPT := "res://addons/editor_proximity_streaming/editor_proximity_streaming.gd"
 const WORLD := "res://world.tscn"
+
 var _position := Vector3(0, 25, 0)
 var _world: Node3D
 
@@ -22,155 +25,116 @@ func _process(_delta: float) -> void:
 
 
 func _run() -> void:
-	if not await _wait_for(func() -> bool: return _is_open(WORLD), "Could not open the map."):
+	if not await _wait_for(func() -> bool:
+		var scene := EditorInterface.get_edited_scene_root()
+		return scene != null and scene.scene_file_path == WORLD and _addon() != null,
+		"Não foi possível abrir a cena de teste e localizar o addon."):
 		return
 	_world = EditorInterface.get_edited_scene_root() as Node3D
-	if not await _expect_previews(["Diagonal", "LeftEdge", "Near", "Overlap"]):
+	var addon := _addon()
+	var first := _world.get_node("NearBox") as Node3D
+	var second := _world.get_node("NearBoxTwin") as Node3D
+	var other := _world.get_node("LocalBox") as Node3D
+	if not await _wait_for(func() -> bool: return _box_names() == ["LocalBox", "NearBox", "NearBoxTwin", "Room"],
+			"Os limites, tags ou marcações nativas produziram caixas incorretas."):
 		return
-	if not _check(not ResourceLoader.has_cached("res://far.tscn"), "A distant prefab was loaded."):
+	if not _check(first.get_scene_instance_load_placeholder() and first.has_node("Building")
+			and first.get_script() == null, "A instância nativa foi substituída."):
 		return
+	var interior := _world.get_node("Room/Interior")
+	var hidden: Dictionary = addon.get("_hidden")
+	if not _check(not addon.get("_boxes").has(interior.get_instance_id())
+			and hidden.has(interior.get_node("Building").get_instance_id()),
+			"Um filho distante recebeu uma caixa separada ou ficou fora da ocultação."):
+		return
+	print("PASS instâncias nativas, classes e hierarquia de caixas")
 
-	var near := _world.get_node("Near") as ProximityPlacement3D
-	var preview := near.get_child(0, true) as Node3D
-	var instance_id := preview.get_instance_id()
-	_position.x += 0.3
-	if not await _expect_previews(["Beyond", "Diagonal", "Near", "Overlap"]):
+	var gizmos: EditorNode3DGizmoPlugin = addon.get("_gizmos")
+	var first_path := _world.get_path_to(first)
+	var first_material: ShaderMaterial = gizmos._material(&"dist_near", first_path)
+	var second_material: ShaderMaterial = gizmos._material(&"dist_near", _world.get_path_to(second))
+	var other_material: ShaderMaterial = gizmos._material(&"dist_local", _world.get_path_to(other))
+	if not _check(first_material == gizmos._material(&"dist_near", first_path)
+			and first_material.get_shader_parameter("class_color") == second_material.get_shader_parameter("class_color")
+			and first_material.get_shader_parameter("brightness") != second_material.get_shader_parameter("brightness")
+			and first_material.get_shader_parameter("class_color") != other_material.get_shader_parameter("class_color"),
+			"As cores por classe e brilho por instância estão inconsistentes."):
 		return
-	if not _check(near.get_child(0, true).get_instance_id() == instance_id, "Reloaded a retained prefab."):
-		return
-	near.position.x += 1.0
-	if not _check(preview.global_position.is_equal_approx(near.global_position), "Preview did not follow the placement."):
-		return
-	if not _check(EditorInterface.save_scene() == OK, "Could not save the map."):
-		return
-	var saved := FileAccess.get_file_as_string(WORLD)
-	if not _check(
-		saved.contains('scene_path = "res://near.tscn"') and not saved.contains('instance=ExtResource'),
-		"The map must save paths and omit instantiated previews."
-	):
-		return
+	print("PASS cor por classe e variação estável de brilho")
 
-	var settings := _world.get_node("Preview") as ProximityPreview3D
-	settings.radius_meters = 2.0
-	_position = Vector3(3, 25, 2)
-	if not await _expect_previews(["Near"]):
+	_position.x = 2.0
+	await get_tree().create_timer(0.35).timeout
+	if not _check(_has_box(second), "A caixa sumiu entre 5 m e 7 m."):
 		return
-	near.open_prefab.call()
-	if not await _wait_for(func() -> bool: return _is_open("res://near.tscn"), "Open Prefab opened the wrong scene."):
+	_position.x = 3.0
+	if not await _wait_for(func() -> bool: return not _has_box(second), "Ao chegar a 5 m a malha não voltou."):
 		return
-	var building := EditorInterface.get_edited_scene_root().get_node("Building") as Node3D
-	building.position.y = 4.0
-	if not _check(EditorInterface.save_scene() == OK, "Could not save the prefab."):
+	_position.x = 2.0
+	await get_tree().create_timer(0.35).timeout
+	if not _check(not _has_box(second), "Uma malha visível voltou à caixa a 6 m."):
 		return
+	_position.x = 0.0
+	if not await _wait_for(func() -> bool: return _has_box(second), "A caixa não voltou além de 7 m."):
+		return
+	print("PASS transição e histerese pela extensão da geometria")
 
-	EditorInterface.open_scene_from_path(WORLD)
-	if not await _wait_for(func() -> bool: return _is_open(WORLD), "Could not return to the map."):
+	if not _check(EditorInterface.save_scene() == OK, "Falha ao salvar a cena de teste."):
 		return
-	if not await _expect_previews(["Near"]):
+	var text := FileAccess.get_file_as_string(WORLD)
+	if not _check(text.contains('instance_placeholder="res://prefab.tscn"')
+			and not text.contains("script =") and not text.contains("visible = false"),
+			"A prévia alterou a configuração salva do mapa."):
 		return
-	preview = near.get_child(0, true) as Node3D
-	if not _check(is_equal_approx(preview.get_node("Building").position.y, 4.0), "Preview did not reflect saved prefab."):
-		return
-	print("PASS position editing and isolated prefab saving")
+	print("PASS arquivo salvo conserva as instâncias nativas")
 
-	_position = Vector3(200, 25, 0)
-	if not await _expect_previews(["Far"]):
+	EditorInterface.set_plugin_enabled(ADDON, false)
+	if not await _wait_for(func() -> bool: return _addon() == null, "Não foi possível desativar o addon."):
 		return
-	EditorInterface.set_plugin_enabled("editor_proximity_streaming", false)
-	if not await _expect_previews([]):
-		return
-	EditorInterface.set_plugin_enabled("editor_proximity_streaming", true)
-	if not await _expect_previews(["Far"]):
-		return
-	if not await _test_classes():
+	EditorInterface.set_plugin_enabled(ADDON, true)
+	if not await _wait_for(func() -> bool: return _addon() != null and _has_box(second), "Falha ao reativar o addon."):
 		return
 	print("PASS editor_proximity_streaming")
 	get_tree().quit(0)
 
 
-func _test_classes() -> bool:
-	var path := "res://classes.tscn"
-	_position = Vector3(0, 1, 0)
-	EditorInterface.open_scene_from_path(path)
-	if not await _wait_for(func() -> bool: return _is_open(path), "Could not open the class fixture."):
-		return false
-	_world = EditorInterface.get_edited_scene_root()
-	var settings := _world.get_node("Preview") as ProximityPreview3D
-	settings.distance_classes[&"dist_custom"] = Vector2(12, 14)
-	if not await _expect_previews(["AwayLimit", "CustomLimit", "LocalLimit", "MidLimit", "NearLimit", "RemoteLimit", "Room"]):
-		return false
-	var room := _world.get_node("Room").get_child(0, true)
-	var detail := room.get_node("Detail")
-	if not _check(detail.get_child_count(true) == 0 and not ResourceLoader.has_cached("res://detail.tscn"),
-			"Interior resource was loaded from outside its volume."):
-		return false
-	_position.z = 3.0
-	if not await _wait_for(func() -> bool: return detail.get_child_count(true) == 1, "Interior did not load in its volume."):
-		return false
-	_position.y = 5.0
-	if not await _wait_for(func() -> bool: return detail.get_child_count(true) == 0, "Interior remained loaded on another floor."):
-		return false
-	print("PASS class defaults, custom class and nested 3D volume")
-
-	var custom := _world.get_node("CustomLimit")
-	_position = Vector3(-1, 1, 0)
-	await get_tree().create_timer(0.25).timeout
-	if not _check(custom.get_child_count(true) == 1, "A placement inside the unload distance was discarded."):
-		return false
-	_position.x = -3.0
-	if not await _wait_for(func() -> bool: return custom.get_child_count(true) == 0, "Custom unload distance was ignored."):
-		return false
-	_position.x = -1.0
-	await get_tree().create_timer(0.25).timeout
-	if not _check(custom.get_child_count(true) == 0, "Outside the load distance the placement was reloaded."):
-		return false
-	print("PASS hysteresis")
-
-	EditorInterface.open_scene_from_path("res://class_near.tscn")
-	if not await _wait_for(
-		func() -> bool: return _is_open("res://class_near.tscn"),
-		"Could not edit the tagged prefab."
-	):
-		return false
-	var prefab := EditorInterface.get_edited_scene_root()
-	prefab.set_meta(&"stream_class", "dist_custom")
-	if not _check(EditorInterface.save_scene() == OK, "Could not save the class metadata."):
-		return false
-	var index: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://proximity_prefabs.json"))
-	return _check(index["res://class_near.tscn"]["class"] == "dist_custom", "Prefab save did not refresh the index.")
+func _addon() -> Node:
+	for candidate in get_tree().root.find_children("*", "EditorPlugin", true, false):
+		var script: Script = candidate.get_script()
+		if script != null and script.resource_path == ADDON_SCRIPT:
+			return candidate
+	return null
 
 
-func _is_open(path: String) -> bool:
-	var root := EditorInterface.get_edited_scene_root()
-	return root != null and root.scene_file_path == path and root.is_inside_tree()
-
-
-func _preview_names() -> Array[String]:
+func _box_names() -> Array[String]:
 	var names: Array[String] = []
-	for node in _world.get_children():
-		if node is ProximityPlacement3D and node.get_child_count(true) == 1:
+	var addon := _addon()
+	if addon == null:
+		return names
+	var boxes: Dictionary = addon.get("_boxes")
+	for id in boxes:
+		var node := instance_from_id(id) as Node
+		if node != null:
 			names.append(str(node.name))
 	names.sort()
 	return names
 
 
-func _expect_previews(expected: Array[String]) -> bool:
-	if not await _wait_for(func() -> bool: return _preview_names() == expected, "Wrong previews for %s" % [expected]):
-		return false
-	print("PASS previews ", expected)
-	return true
+func _has_box(node: Node) -> bool:
+	var addon := _addon()
+	return addon != null and addon.get("_boxes").has(node.get_instance_id())
 
 
 func _wait_for(condition: Callable, message: String) -> bool:
-	for frame in 480:
+	var deadline := Time.get_ticks_msec() + 8000
+	while Time.get_ticks_msec() < deadline:
 		await get_tree().process_frame
 		if condition.call():
 			return true
 	return _check(false, message)
 
 
-func _check(condition: bool, message: String) -> bool:
-	if not condition:
+func _check(passed: bool, message: String) -> bool:
+	if not passed:
 		push_error(message)
 		get_tree().quit(1)
-	return condition
+	return passed
